@@ -4,8 +4,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js"
+    "test": "node --test",
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -23,7 +24,6 @@
     "luxon": "^3.7.2",
     "mongoose": "^9.9.2",
     "path-to-regexp": "^8.4.2",
-    "pg": "^8.23.0",
     "socket.io": "^4.8.3",
     "undici": "^7.29.0",
     "winston": "^3.19.0"
