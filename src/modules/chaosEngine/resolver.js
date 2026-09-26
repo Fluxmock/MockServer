@@ -58,19 +58,36 @@ export const loadChaosRules = async (projectId, endpointId = null) => {
 
   const projectKey = getChaosRuleCacheKey(projectId, null);
   const endpointKey = endpointId ? getChaosRuleCacheKey(projectId, endpointId) : null;
+  const legacyEndpointKey = endpointId
+    ? `chaos:rules:project:${String(projectId)}:endpoint;${String(endpointId)}`
+    : null;
 
-  const [projectRulesRaw, endpointRulesRaw] = await Promise.all([
+  console.log(`[chaos] loading rules → projectId:${projectId} endpointId:${endpointId ?? "none"}`);
+
+  const [projectRulesRaw, endpointRulesRaw, legacyEndpointRulesRaw] = await Promise.all([
     redisClient.get(projectKey),
     endpointKey ? redisClient.get(endpointKey) : null,
+    legacyEndpointKey ? redisClient.get(legacyEndpointKey) : null,
   ]);
 
+  console.log(`[chaos] project rules  → ${projectRulesRaw ? "cache HIT" : "cache MISS (no rules)"}`);
+  if (endpointKey) {
+    console.log(`[chaos] endpoint rules → ${endpointRulesRaw ? "cache HIT" : legacyEndpointRulesRaw ? "legacy cache HIT" : "cache MISS (no rules)"}`);
+  }
+
   const projectRules = projectRulesRaw ? JSON.parse(projectRulesRaw) : [];
-  const endpointRules = endpointRulesRaw ? JSON.parse(endpointRulesRaw) : [];
+  const endpointRules = endpointRulesRaw ? JSON.parse(endpointRulesRaw) : legacyEndpointRulesRaw ? JSON.parse(legacyEndpointRulesRaw) : [];
+
+  console.log("🔍 projectRules count:", projectRules.length);
+  console.log("🔍 endpointRules count:", endpointRules.length);
 
   const scopedProjectRules = projectRules.map((rule) => ({ ...rule, scope: "project" }));
   const scopedEndpointRules = endpointRules.map((rule) => ({ ...rule, scope: "endpoint" }));
 
-  return resolveChaosRules([...scopedProjectRules, ...scopedEndpointRules]);
+  const resolved = resolveChaosRules([...scopedProjectRules, ...scopedEndpointRules]);
+  console.log(`[chaos] resolved ${resolved.length} rule(s) to apply:`, resolved.map(r => r.ruleType));
+
+  return resolved;
 };
 
 export const loadProjectAndEndpointRules = async (projectId, endpointId = null) => {

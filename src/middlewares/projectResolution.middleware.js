@@ -66,7 +66,23 @@ const projectResolver = async (req, res, next) => {
     const cacheKey = `project:key:${projectKey}`;
     const cached = await redisClient.get(cacheKey);
 
-    // --- MongoDB source of truth ---
+    if (cached) {
+      const parsedCache = JSON.parse(cached);
+
+      if (!parsedCache.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: "Project is inactive",
+        });
+      }
+
+      console.log(`[project] cache HIT  → key:${projectKey} projectId:${parsedCache.projectId}`);
+      req.projectId = parsedCache.projectId;
+      return next();
+    }
+
+    // Cache miss → MongoDB
+    console.log(`[project] cache MISS → key:${projectKey} querying MongoDB`);
     const project = await Project.findOne(
       { projectKey },
       "_id isActive updatedAt"
@@ -80,33 +96,25 @@ const projectResolver = async (req, res, next) => {
     }
 
     if (!project.isActive) {
-      // explicit negative cache invalidation for deactivated projects
-      await redisClient.del(cacheKey);
       return res.status(403).json({
         success: false,
         message: "Project is inactive",
       });
     }
 
-    if (cached) {
-      try {
-        const parsedCache = JSON.parse(cached);
-        const cacheValid = isProjectCacheValid(parsedCache, project);
-
-        if (cacheValid) {
-          req.projectId = normalizeProjectId(parsedCache.projectId);
-          return next();
-        }
-      } catch (error) {
-        // ignore malformed cache and refresh below
-      }
-    }
-
     const cacheEntry = buildCacheEntry(project);
-    await redisClient.set(cacheKey, JSON.stringify(cacheEntry), "EX", CACHE_TTL_SECONDS);
 
+    await redisClient.set(
+      cacheKey,
+      JSON.stringify(cacheEntry),
+      "EX",
+      CACHE_TTL_SECONDS
+    );
+
+    console.log(`[project] MongoDB HIT → projectId:${project._id} cached for ${CACHE_TTL_SECONDS}s`);
     req.projectId = normalizeProjectId(project._id);
-    next();
+
+next();
   } catch (error) {
     next(error);
   }
