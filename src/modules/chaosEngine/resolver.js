@@ -31,9 +31,11 @@ export const getChaosRuleCacheKey = (projectId, endpointId = null) => {
 export const resolveChaosRules = (rules = []) => {
   const byType = new Map();
 
+  // first pass — collect all rules including disabled ones, so endpoint-scope
+  // disabled rules can suppress project-scope rules of the same type
   for (const rule of rules) {
     const normalized = normalizeRule(rule);
-    if (!normalized || !normalized.isEnabled) continue;
+    if (!normalized) continue;
 
     const existing = byType.get(normalized.ruleType);
 
@@ -42,13 +44,15 @@ export const resolveChaosRules = (rules = []) => {
       continue;
     }
 
-    // endpoint-scoped rule overrides project-scoped rule of the same type
+    // endpoint-scoped rule always wins over project-scoped — even if disabled
+    // this allows endpoint rules to explicitly suppress project rules
     if (normalized.scope === "endpoint" && existing.scope !== "endpoint") {
       byType.set(normalized.ruleType, normalized);
     }
   }
 
-  return Array.from(byType.values());
+  // second pass — filter out disabled rules after scope resolution
+  return Array.from(byType.values()).filter((r) => r.isEnabled);
 };
 
 // Fetch rules for one scope — Redis first, MongoDB fallback, re-warm cache on miss
