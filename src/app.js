@@ -5,6 +5,7 @@ import projectResolver from "./middlewares/projectResolution.middleware.js";
 import endpointResolver from "./middlewares/endpointResolution.middleware.js";
 import chaosResolutionMiddleware from "./middlewares/chaosRuleResolution.middleware.js";
 import resolveTemplate from "./modules/templating/resolveTemplate.js";
+import { emitRequestLog } from "./modules/logging/emit.js";
 
 const app = express();
 
@@ -22,6 +23,15 @@ app.get("/health", (req, res) => {
 });
 
 app.use(projectResolver);
+
+// Register the finish listener immediately after projectId is set.
+// This way every response — normal mock, chaos-injected, or 404 —
+// gets logged. emitRequestLog only stamps req._startTime and attaches
+// res.on("finish"), so it adds zero latency to the request path.
+app.use((req, res, next) => {
+  emitRequestLog(req, res);
+  next();
+});
 
 app.use(async (req, res, next) => {
   try {
