@@ -1,45 +1,16 @@
 import { Project } from "../models/Project.js";
-import redisClient from "../config/redis.js";
+import { readOrRebuild, runtimeCacheKeys } from "../services/runtimeCache.service.js";
 
-const CACHE_TTL_SECONDS = 300; // 5 minutes
+const normalizeProjectId = (projectId) => projectId ? String(projectId) : null;
 
-const normalizeProjectId = (projectId) =>
-  projectId ? String(projectId).toString() : null;
+const isProjectCacheEntry = (value) => Boolean(
+  value &&
+  typeof value === "object" &&
+  typeof value.projectId === "string" &&
+  typeof value.isActive === "boolean"
+);
 
-const normalizeTimestamp = (value) => {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  return Number.isNaN(time) ? null : time;
-};
-
-export const isProjectCacheValid = (cachedProject, latestProject) => {
-  if (!cachedProject || !latestProject) return false;
-
-  const cachedProjectId = normalizeProjectId(cachedProject.projectId);
-  const latestProjectId = normalizeProjectId(latestProject._id);
-
-  if (cachedProjectId !== latestProjectId) {
-    return false;
-  }
-
-  const cachedActive = Boolean(cachedProject.isActive);
-  const latestActive = Boolean(latestProject.isActive);
-
-  if (cachedActive !== latestActive) {
-    return false;
-  }
-
-  const cachedUpdatedAt = normalizeTimestamp(cachedProject.updatedAt);
-  const latestUpdatedAt = normalizeTimestamp(latestProject.updatedAt);
-
-  if (cachedUpdatedAt === null || latestUpdatedAt === null) {
-    return true;
-  }
-
-  return cachedUpdatedAt === latestUpdatedAt;
-};
-
-const buildCacheEntry = (project) => ({
+const toCacheEntry = (project) => ({
   projectId: normalizeProjectId(project._id),
   isActive: Boolean(project.isActive),
   updatedAt: project.updatedAt ? new Date(project.updatedAt).toISOString() : null,
@@ -47,76 +18,40 @@ const buildCacheEntry = (project) => ({
 
 const projectResolver = async (req, res, next) => {
   try {
-    // URL: /pk_abc123/api/v1/users
-    // segments[1] = "pk_abc123"  ← projectKey
-    // segments[2+] = actual mock path
     const segments = req.path.split("/");
     const projectKey = segments[1];
 
     if (!projectKey || !projectKey.startsWith("pk_")) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or missing project key in URL",
-      });
+      return res.status(400).json({ success: false, message: "Invalid or missing project key in URL" });
     }
 
-    // rewrite so downstream sees /api/v1/users not /pk_abc123/api/v1/users
     req.mockPath = "/" + segments.slice(2).join("/");
 
-    const cacheKey = `project:key:${projectKey}`;
-    const cached = await redisClient.get(cacheKey);
-
-    if (cached) {
-      const parsedCache = JSON.parse(cached);
-
-      if (!parsedCache.isActive) {
-        return res.status(403).json({
-          success: false,
-          message: "Project is inactive",
-        });
-      }
-
-      console.log(`[project] cache HIT  → key:${projectKey} projectId:${parsedCache.projectId}`);
-      req.projectId = parsedCache.projectId;
-      return next();
-    }
-
-    // Cache miss → MongoDB
-    console.log(`[project] cache MISS → key:${projectKey} querying MongoDB`);
-    const project = await Project.findOne(
-      { projectKey },
-      "_id isActive updatedAt"
-    ).lean();
+    const project = await readOrRebuild({
+      cacheKey: runtimeCacheKeys.project(projectKey),
+      versionKey: runtimeCacheKeys.projectVersion(projectKey),
+      validate: isProjectCacheEntry,
+      load: async () => {
+        const found = await Project.findOne(
+          { projectKey },
+          "_id isActive updatedAt"
+        ).lean();
+        return found ? toCacheEntry(found) : null;
+      },
+    });
 
     if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
+      return res.status(404).json({ success: false, message: "Project not found" });
     }
 
     if (!project.isActive) {
-      return res.status(403).json({
-        success: false,
-        message: "Project is inactive",
-      });
+      return res.status(403).json({ success: false, message: "Project is inactive" });
     }
 
-    const cacheEntry = buildCacheEntry(project);
-
-    await redisClient.set(
-      cacheKey,
-      JSON.stringify(cacheEntry),
-      "EX",
-      CACHE_TTL_SECONDS
-    );
-
-    console.log(`[project] MongoDB HIT → projectId:${project._id} cached for ${CACHE_TTL_SECONDS}s`);
-    req.projectId = normalizeProjectId(project._id);
-
-next();
+    req.projectId = project.projectId;
+    return next();
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 

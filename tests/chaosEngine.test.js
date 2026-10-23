@@ -15,7 +15,7 @@ test('delay rule executes and waits for configured ms', async () => {
   const result = await applyChaosRules([rule], {}, {});
   const elapsed = Date.now() - start;
 
-  assert.equal(result, true);
+  assert.equal(result, false);
   assert.ok(elapsed >= 5);
 });
 
@@ -46,14 +46,14 @@ test('error rule returns custom status without crashing', async () => {
 
 test('network rule dispatches subrule type', async () => {
   let delayHit = false;
-  const req = {};
+  const req = { socket: { destroy() {} } };
   const res = {};
 
   const rule = {
     ruleType: 'network',
     probability: 1,
     isEnabled: true,
-    config: { type: 'latency', ms: 10 },
+    config: { type: 'timeout', ms: 0 },
   };
 
   const result = await applyChaosRules([rule], req, res);

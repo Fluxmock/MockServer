@@ -1,8 +1,6 @@
-import redisClient from "../../config/redis.js";
 import ApiError from "../../utils/ApiError.js";
 import ChaosRuleSet from "../../models/ChaosRule.js";
-
-const CACHE_TTL_SECONDS = 300;
+import { readOrRebuild, runtimeCacheKeys } from "../../services/runtimeCache.service.js";
 
 const normalizeRule = (rule) => {
   if (!rule || typeof rule.ruleType !== "string") {
@@ -19,13 +17,6 @@ const normalizeRule = (rule) => {
     updatedAt: rule.updatedAt ?? null,
     scope: rule.scope ?? "project",
   };
-};
-
-export const getChaosRuleCacheKey = (projectId, endpointId = null) => {
-  if (!endpointId) {
-    return `chaos:rules:project:${String(projectId)}`;
-  }
-  return `chaos:rules:project:${String(projectId)}:endpoint:${String(endpointId)}`;
 };
 
 export const resolveChaosRules = (rules = []) => {
@@ -55,31 +46,21 @@ export const resolveChaosRules = (rules = []) => {
   return Array.from(byType.values()).filter((r) => r.isEnabled);
 };
 
-// Fetch rules for one scope — Redis first, MongoDB fallback, re-warm cache on miss
-const getRules = async (cacheKey, projectId, endpointId = null) => {
-  const cached = await redisClient.get(cacheKey);
-
-  if (cached) {
-    console.log(`[chaos] cache HIT  → ${cacheKey}`);
-    return JSON.parse(cached);
-  }
-
-  console.log(`[chaos] cache MISS → ${cacheKey} querying MongoDB`);
-
-  const ruleSet = await ChaosRuleSet.findOne({
-    projectId,
-    endpointId: endpointId ?? null,
-  }).lean();
-
-  const rules = ruleSet?.rules ?? [];
-
-  // re-warm cache so next request doesn't hit MongoDB again
-  await redisClient.set(cacheKey, JSON.stringify(rules), "EX", CACHE_TTL_SECONDS);
-
-  console.log(`[chaos] MongoDB → ${rules.length} rule(s) cached for ${CACHE_TTL_SECONDS}s`);
-
-  return rules;
-};
+// Fetch rules for one scope — Redis first, MongoDB fallback. Disabled rules are
+// intentionally retained because an endpoint-level disabled rule suppresses a
+// project-level rule of the same type.
+const getRules = (projectId, endpointId = null) => readOrRebuild({
+  cacheKey: runtimeCacheKeys.chaos(projectId, endpointId),
+  versionKey: runtimeCacheKeys.chaosVersion(projectId, endpointId),
+  validate: Array.isArray,
+  load: async () => {
+    const ruleSet = await ChaosRuleSet.findOne({
+      projectId,
+      endpointId: endpointId ?? null,
+    }).lean();
+    return ruleSet?.rules ?? [];
+  },
+});
 
 export const loadChaosRules = async (projectId, endpointId = null) => {
   if (!projectId) {
@@ -88,14 +69,10 @@ export const loadChaosRules = async (projectId, endpointId = null) => {
 
   console.log(`[chaos] loading rules → projectId:${projectId} endpointId:${endpointId ?? "none"}`);
 
-  const projectKey = getChaosRuleCacheKey(projectId, null);
-  const projectRules = await getRules(projectKey, projectId, null);
-
-  let endpointRules = [];
-  if (endpointId) {
-    const endpointKey = getChaosRuleCacheKey(projectId, endpointId);
-    endpointRules = await getRules(endpointKey, projectId, endpointId);
-  }
+  const [projectRules, endpointRules] = await Promise.all([
+    getRules(projectId, null),
+    endpointId ? getRules(projectId, endpointId) : Promise.resolve([]),
+  ]);
 
   const scopedProjectRules = projectRules.map((r) => ({ ...r, scope: "project" }));
   const scopedEndpointRules = endpointRules.map((r) => ({ ...r, scope: "endpoint" }));
