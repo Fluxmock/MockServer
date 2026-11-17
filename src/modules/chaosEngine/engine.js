@@ -29,6 +29,7 @@ const ruleHandlers = {
 };
 
 export const applyChaosRules = async (rules = [], req, res) => {
+  req.appliedChaosRules = [];
   // sort rules so delay always runs first
   const sorted = [...rules].sort((a, b) => {
     const ai = RULE_ORDER.indexOf(a.ruleType);
@@ -52,7 +53,18 @@ export const applyChaosRules = async (rules = [], req, res) => {
     }
 
     console.log(`[engine] applying ${rule.ruleType}`);
-    const terminated = await handler(rule, req, res);
+    // Record before a terminal handler sends its response: finish listeners may
+    // run before the handler's promise resolves. Delay records only an actual wait.
+    if (rule.ruleType !== "delay") req.appliedChaosRules.push(rule.ruleType);
+    let terminated;
+    try {
+      terminated = await handler(rule, req, res);
+    } catch (error) {
+      if (rule.ruleType !== "delay") req.appliedChaosRules.pop();
+      throw error;
+    }
+    // Rate limits below threshold and other no-op handlers are not injections.
+    if (rule.ruleType !== "delay" && terminated !== true) req.appliedChaosRules.pop();
 
     // if the rule sent a response (returned true), stop processing
     if (terminated === true) {

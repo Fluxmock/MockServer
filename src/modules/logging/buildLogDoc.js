@@ -8,16 +8,13 @@
  *   projectResolution   → req.projectId  (string), req.mockPath (string)
  *   endpointResolution  → req.endpoint   ({ _id, method, path, ... })
  *                         req.pathParams ({ param: value })
- *   chaosResolution     → req.chaosRules (array of rule objects)
+ *   chaos engine        → req.appliedChaosRules (types actually injected)
  *   emit.js             → req._startTime (Date.now() ms, stamped before middlewares)
  */
 export function buildLogDoc(req, res) {
   const responseTime = Date.now() - (req._startTime ?? Date.now());
 
-  // Only collect rules that were actually active/enabled
-  const appliedRules = (req.chaosRules ?? [])
-    .filter((r) => r.isEnabled)
-    .map((r) => r.ruleType);
+  const appliedRules = [...new Set(req.appliedChaosRules ?? [])];
 
   return {
     projectId:    req.projectId          ?? null,

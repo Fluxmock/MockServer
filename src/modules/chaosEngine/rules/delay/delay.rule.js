@@ -32,6 +32,7 @@ export const applyDelayRule = async (rule, req, res) => {
 
   if (!Number.isFinite(ms) || ms <= 0) return false;
 
+  (req.appliedChaosRules ??= []).push("delay");
   await new Promise((resolve) => setTimeout(resolve, ms));
   console.log(`[delay] injected ${ms}ms`);
   return false; // return false so engine continues — delay never terminates the request
