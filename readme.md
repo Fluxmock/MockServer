@@ -154,7 +154,7 @@ The current project dependencies are defined in [package.json](package.json). Th
 
 Development dependencies:
 
-- nodemon — local development reloading
+- Node.js `--watch` — local development reloading
 
 ---
 

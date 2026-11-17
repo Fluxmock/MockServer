@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "dev": "nodemon src/server.js",
+    "dev": "node --watch src/server.js",
     "start": "node src/server.js"
   },
   "keywords": [],
@@ -22,13 +22,10 @@
     "express": "^5.2.1",
     "ioredis": "^6.0.0",
     "luxon": "^3.7.2",
-    "mongoose": "^9.9.2",
+    "mongoose": "^9.12.2",
     "path-to-regexp": "^8.4.2",
     "socket.io": "^4.8.3",
-    "undici": "^7.29.0",
+    "undici": "^7.30.2",
     "winston": "^3.19.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
   }
 }
